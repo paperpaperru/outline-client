@@ -14,10 +14,12 @@
 
 package org.outline.vpn;
 
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -30,6 +32,7 @@ import android.net.NetworkRequest;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.ParcelFileDescriptor;
 import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -40,6 +43,12 @@ import org.outline.TunnelConfig;
 import org.outline.log.SentryErrorReporter;
 import org.outline.shadowsocks.ShadowsocksConfig;
 import shadowsocks.Shadowsocks;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import org.outline.vpn.xray.V2rayController;
+import org.outline.vpn.xray.V2rayVPNService;
+import org.outline.vpn.xray.AppConfigs;
 
 /**
  * Android service responsible for managing a VPN tunnel. Clients must bind to this
@@ -103,12 +112,14 @@ public class VpnTunnelService extends VpnService {
     }
   }
 
+  private Context context;
   private VpnTunnel vpnTunnel;
   private TunnelConfig tunnelConfig;
   private NetworkConnectivityMonitor networkConnectivityMonitor;
   private VpnTunnelStore tunnelStore;
   private Notification.Builder notificationBuilder;
-
+  private V2rayVPNService v2rayVPNService = new V2rayVPNService();
+  private ParcelFileDescriptor tunFd;
   private final IVpnTunnelService.Stub binder = new IVpnTunnelService.Stub() {
     @Override
     public int startTunnel(TunnelConfig config) {
@@ -245,6 +256,7 @@ public class VpnTunnelService extends VpnService {
   // Tunnel API
 
   private ErrorCode startTunnel(final TunnelConfig config) {
+    this.context = getApplicationContext();
     return startTunnel(config, false);
   }
 
@@ -267,15 +279,22 @@ public class VpnTunnelService extends VpnService {
       }
     }
 
-    final shadowsocks.Config configCopy = new shadowsocks.Config();
-    configCopy.setHost(config.proxy.host);
-    configCopy.setPort(config.proxy.port);
-    configCopy.setCipherName(config.proxy.method);
-    configCopy.setPassword(config.proxy.password);
-    configCopy.setPrefix(config.proxy.prefix);
-    final shadowsocks.Client client;
+    // final shadowsocks.Config configCopy = new shadowsocks.Config();
+    // configCopy.setHost(config.proxy.host);
+    // configCopy.setPort(config.proxy.port);
+    // configCopy.setCipherName(config.proxy.method);
+    // configCopy.setPassword(config.proxy.password);
+    // configCopy.setPrefix(config.proxy.prefix);
+    // final shadowsocks.Client client;
     try {
-      client = new shadowsocks.Client(configCopy);
+      // client = new shadowsocks.Client(configCopy);
+if (V2rayController.getConnectionState() == AppConfigs.V2RAY_STATES.V2RAY_DISCONNECTED) {
+        // in StartV2ray function we can set remark to show that on notification.
+        // StartV2ray function steel need json config of v2ray. Unfortunately, it does not accept URI or base64 type at the moment.
+        V2rayController.StartV2ray(context, "Default", getXrayConfig().toString(), null);
+    } else {
+        V2rayController.StopV2ray(context);
+    }
     } catch (Exception e) {
       LOG.log(Level.WARNING, "Invalid configuration", e);
       tearDownActiveTunnel();
@@ -287,7 +306,7 @@ public class VpnTunnelService extends VpnService {
       try {
         // Do not perform connectivity checks when connecting on startup. We should avoid failing
         // the connection due to a network error, as network may not be ready.
-        errorCode = checkServerConnectivity(client);
+        // errorCode = checkServerConnectivity(client);
         if (!(errorCode == ErrorCode.NO_ERROR
                 || errorCode == ErrorCode.UDP_RELAY_NOT_ENABLED)) {
           tearDownActiveTunnel();
@@ -313,7 +332,7 @@ public class VpnTunnelService extends VpnService {
     final boolean remoteUdpForwardingEnabled =
         isAutoStart ? tunnelStore.isUdpSupported() : errorCode == ErrorCode.NO_ERROR;
     try {
-      vpnTunnel.connectTunnel(client, remoteUdpForwardingEnabled);
+      System.out.println("Connecting tunnel");
     } catch (Exception e) {
       LOG.log(Level.SEVERE, "Failed to connect the tunnel", e);
       tearDownActiveTunnel();
@@ -354,6 +373,7 @@ public class VpnTunnelService extends VpnService {
     stopForeground();
     tunnelConfig = null;
     stopNetworkConnectivityMonitor();
+    V2rayController.StopV2ray(context);
     tunnelStore.setTunnelStatus(TunnelStatus.DISCONNECTED);
   }
 
@@ -385,6 +405,11 @@ public class VpnTunnelService extends VpnService {
     public NetworkConnectivityMonitor() {
       this.connectivityManager =
           (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+    }
+
+    public NetworkConnectivityMonitor(Context context) {
+      this.connectivityManager =
+          (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
     }
 
     @Override
@@ -652,5 +677,157 @@ public class VpnTunnelService extends VpnService {
       LOG.warning(String.format(Locale.ROOT, "Failed to retrieve string resource: %s", name));
     }
     return resource;
+  }
+
+  private static JsonObject getXrayConfig() {
+    // Создание JSON объекта
+        JsonObject jsonConfig = new JsonObject();
+  
+        // Добавление "log" объекта
+        JsonObject log = new JsonObject();
+        log.addProperty("loglevel", "debug");
+        log.addProperty("dnsLog", true);
+        jsonConfig.add("log", log);
+  
+        // Добавление "inbounds" массива
+        JsonArray inbounds = new JsonArray();
+  
+        // Добавление "socksInbound" объекта в "inbounds"
+        JsonObject socksInbound = new JsonObject();
+        socksInbound.addProperty("port", 1080);
+        socksInbound.addProperty("listen", "127.0.0.1");
+        socksInbound.addProperty("protocol", "socks");
+  
+        // Добавление "settings" объекта в "socksInbound" с вложенными свойствами
+        JsonObject socksSettings = new JsonObject();
+        socksSettings.addProperty("udp", true);
+  
+        socksInbound.add("settings", socksSettings);
+  
+        inbounds.add(socksInbound);
+  
+        jsonConfig.add("inbounds", inbounds);
+  
+        // Добавление "outbounds" массива
+        JsonArray outbounds = new JsonArray();
+  
+        // Добавление "vless" объекта в "outbounds"
+        JsonObject vlessOutbound = new JsonObject();
+        vlessOutbound.addProperty("protocol", "vless");
+  
+        // Добавление "settings" объекта в "vless" с вложенными свойствами
+        JsonObject vlessSettings = new JsonObject();
+  
+        // Добавление "vnext" массива в "vlessSettings"
+        JsonArray vnext = new JsonArray();
+        JsonObject vnextServer = new JsonObject();
+        vnextServer.addProperty("address", "135.181.44.107");
+        vnextServer.addProperty("port", 10088);
+  
+        // Добавление "users" массива в "vnextServer"
+        JsonArray users = new JsonArray();
+        JsonObject user = new JsonObject();
+        user.addProperty("encryption", "none");
+        user.addProperty("id", "b831381d-6324-4d53-ad4f-8cda48b30822");
+        users.add(user);
+  
+        vnextServer.add("users", users);
+        vnext.add(vnextServer);
+  
+        vlessSettings.add("vnext", vnext);
+        vlessOutbound.add("settings", vlessSettings);
+  
+        // Добавление "streamSettings" объекта в "vlessOutbound"
+        JsonObject streamSettings = new JsonObject();
+        streamSettings.addProperty("network", "tcp");
+        streamSettings.addProperty("security", "tls");
+  
+        // Добавление "tlsSettings" объекта в "streamSettings" с вложенными свойствами
+        JsonObject tlsSettings = new JsonObject();
+        tlsSettings.addProperty("serverName", "test2.xray.vpn.paperpaper.io");
+        tlsSettings.addProperty("allowInsecure", false);
+        tlsSettings.addProperty("fingerprint", "chrome");
+  
+        // Добавление "alpn" массива в "tlsSettings"
+        JsonArray alpn = new JsonArray();
+        alpn.add("h2");
+        alpn.add("http/1.1");
+        tlsSettings.add("alpn", alpn);
+  
+        tlsSettings.addProperty("disableSessionResumption", true);
+  
+        JsonArray certificates = new JsonArray();
+        JsonObject certificate = new JsonObject();
+  
+        certificate.addProperty("usage", "verify");
+  
+  JsonArray certificateCode = new JsonArray();
+        certificateCode.add("-----BEGIN CERTIFICATE-----");
+        certificateCode.add("MIIEBzCCAu+gAwIBAgIUVRAlD8yPA/u+ZChsSjTOY5ozflQwDQYJKoZIhvcNAQEL");
+        certificateCode.add("BQAwgZIxCzAJBgNVBAYTAlJTMRUwEwYDVQQIDAxHcmFkIEJlb2dyYWQxETAPBgNV");
+        certificateCode.add("BAoMCFBhcGVyVlBOMREwDwYDVQQLDAhTZWN1cml0eTEdMBsGA1UEAwwUQWxleGFu");
+        certificateCode.add("ZGVyIEtvdGVsbmlrb3YxJzAlBgkqhkiG9w0BCQEWGGtvdGVsbmlrb3ZAcGFwZXJw");
+        certificateCode.add("YXBlci5pbzAeFw0yMzA5MjEwOTEyNTRaFw0yNjA5MjAwOTEyNTRaMIGSMQswCQYD");
+        certificateCode.add("VQQGEwJSUzEVMBMGA1UECAwMR3JhZCBCZW9ncmFkMREwDwYDVQQKDAhQYXBlclZQ");
+        certificateCode.add("TjERMA8GA1UECwwIU2VjdXJpdHkxHTAbBgNVBAMMFEFsZXhhbmRlciBLb3RlbG5p");
+        certificateCode.add("a292MScwJQYJKoZIhvcNAQkBFhhrb3RlbG5pa292QHBhcGVycGFwZXIuaW8wggEi");
+        certificateCode.add("MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC3Foj0xsewQx6y+NCh1rQpkEGM");
+        certificateCode.add("Y+sAouNd+/aXQt9ajZS65FTF50fceL1qrhPb0uH0uXaTGffAwL0TBJK7UasJKwrD");
+        certificateCode.add("CnPEZJ/X50pm1r6edVSBrJvwvxSnhIaBRZU8GOJTamXneJFn3yOQkm0SQys6z8nn");
+        certificateCode.add("Oc+S/4gQ8WJkmC9u3er/etQWqR3QKnyWjogVTg9oe2BGhEPjMk3uKgUY1fwNsIDV");
+        certificateCode.add("fmY17ql2WrECLCT3TIrN6QV0dw+rqYNAZ/X+s4YIqTq3NGt4dj/48ZhbJR/PIRj2");
+        certificateCode.add("ym2yKGd+LObKHC47pF9eT0dApeiJNVNirj+QGdBaWpt2llmYwlvfgpdI4zu/AgMB");
+        certificateCode.add("AAGjUzBRMB0GA1UdDgQWBBT23BYJfz5+urI5KmWyc/T+OZTEPTAfBgNVHSMEGDAW");
+        certificateCode.add("gBT23BYJfz5+urI5KmWyc/T+OZTEPTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3");
+        certificateCode.add("DQEBCwUAA4IBAQAiYGCWPg7oH6xTBTI6WPAQiOtTMIPJfG+N0ks5DyLWMQ3y8+aH");
+        certificateCode.add("4gG27J8K03XOHej7RS3CrkU5RPCnbtqbZYiqkF2GkWuewpluQiUG8pZSDnkHspFT");
+        certificateCode.add("2fkrRuF9rN7zTppT96e6hwQjCCi8iZZyePIfv3ZCKEDjUHFWwuDcJtVLNE3sgFT7");
+        certificateCode.add("RMJWHGhV9utOeTb8oxQBdN7s8eym4pvqDTk2v8RWReLqWapIpBejpYFc6C6Dbvjf");
+        certificateCode.add("jF+fZMVchhZJ+RRroHI10UsdiGZwLzeabjg5kfue+3l898e/f08bx9O5vj9PoaNH");
+        certificateCode.add("0GBUl0VewvXr22q4snNfsn6DXxr1v1BBB8Yp");
+        certificateCode.add("-----END CERTIFICATE-----");
+  
+        certificate.add("certificate", certificateCode);
+  
+        certificates.add(certificate);
+  
+        tlsSettings.add("certificates", certificates);
+  
+        streamSettings.add("tlsSettings", tlsSettings);
+  
+        vlessOutbound.add("streamSettings", streamSettings);
+  
+        outbounds.add(vlessOutbound);
+  
+        JsonObject freedomOutbound = new JsonObject();
+  
+        freedomOutbound.addProperty("protocol", "freedom");
+        freedomOutbound.addProperty("tag", "direct");
+  
+        outbounds.add(freedomOutbound);
+  
+        jsonConfig.add("outbounds", outbounds);
+  
+        // Добавление "routing" объекта
+        JsonObject routing = new JsonObject();
+        routing.addProperty("domainStrategy", "IPIfNonMatch");
+  
+        JsonArray rules = new JsonArray();
+  
+        JsonObject rule = new JsonObject();
+        rule.addProperty("type", "field");
+        rule.addProperty("outboundTag", "direct");
+  
+        JsonArray ip = new JsonArray();
+        ip.add("geoip:private");
+        rule.add("ip", ip);
+  
+        rules.add(rule);
+  
+        routing.add("rules", rules);
+  
+        jsonConfig.add("routing", routing);
+  
+        return jsonConfig;
   }
 }

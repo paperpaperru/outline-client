@@ -7,11 +7,11 @@ group = 'org.outline'
 
 android {
     namespace 'org.outline'
-    compileSdk 32
+    compileSdk 34
 
     defaultConfig {
         minSdk 22
-        targetSdk 32
+        targetSdk 34
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
@@ -40,9 +40,15 @@ dependencies {
             include: ['tun2socks.aar'])
     // Note: A flatDir repository might be preferable, but this is not compatible
     // with a composite build (https://github.com/gradle/gradle/issues/911).
+    compileOnly fileTree(dir: '../../../../../third_party/xray-core/android',
+            include: ['libv2ray.aar'])
 
     implementation 'io.sentry:sentry-android:2.0.2'
     implementation 'org.apache.commons:commons-collections4:4.4'
+    implementation 'androidx.core:core:1.7.0'
+    implementation 'androidx.annotation:annotation:1.7.1'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation group: 'com.google.code.gson', name: 'gson', version: '2.10.1'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'

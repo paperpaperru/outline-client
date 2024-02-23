@@ -23,6 +23,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.net.VpnService;
+import android.os.Build;
 import android.os.IBinder;
 import java.util.HashMap;
 import java.util.Map;
@@ -133,7 +134,11 @@ public class OutlinePlugin extends CordovaPlugin {
     IntentFilter broadcastFilter = new IntentFilter();
     broadcastFilter.addAction(VpnTunnelService.STATUS_BROADCAST_KEY);
     broadcastFilter.addCategory(context.getPackageName());
-    context.registerReceiver(vpnTunnelBroadcastReceiver, broadcastFilter);
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      context.registerReceiver(vpnTunnelBroadcastReceiver, broadcastFilter, Context.RECEIVER_EXPORTED);
+  } else {
+      context.registerReceiver(vpnTunnelBroadcastReceiver, broadcastFilter);
+  }
 
     context.bindService(new Intent(context, VpnTunnelService.class), vpnServiceConnection,
         Context.BIND_AUTO_CREATE);

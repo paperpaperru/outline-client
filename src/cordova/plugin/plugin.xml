@@ -23,6 +23,10 @@
       <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
       <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
       <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+      <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+      <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+        android:minSdkVersion="34" />
     </config-file>
 
     <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
@@ -35,6 +39,25 @@
         <intent-filter>
           <action android:name="android.net.VpnService" />
         </intent-filter>
+      </service>
+
+      <service
+        android:name="org.outline.vpn.xray.V2rayVPNService"
+        android:enabled="true"
+        android:exported="false"
+        android:label="@string/app_name"
+        android:permission="android.permission.BIND_VPN_SERVICE"
+        android:foregroundServiceType="specialUse"
+        android:process=":RunSoLibV2RayDaemon">
+        <intent-filter>
+            <action android:name="android.net.VpnService" />
+        </intent-filter>
+        <meta-data
+            android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+            android:value="true" />
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="vpn" />
       </service>
 
       <receiver android:name="org.outline.vpn.VpnServiceStarter" android:enabled="true" android:exported="false">
@@ -57,11 +80,14 @@
     <source-file
       src="android/libs/tun2socks.aar"
       target-dir="app/src/main/libs" />
+    <source-file
+      src="android/libs/libv2ray.aar"
+      target-dir="app/src/main/libs" />
     <!-- These are JNI libraries with debug symbols required for crash reporting tools. -->
     <source-file
       src="android/libs/obj"
       target-dir="app/" />
-
+    
     <resource-file src="android/resources/small_icon.png" target="res/drawable/small_icon.png" />
     <resource-file src="android/resources/bypass_subnets.xml" target="res/values/bypass_subnets.xml" />
     <resource-file src="android/resources/strings/" target="res/" />
